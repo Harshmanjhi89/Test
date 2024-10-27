@@ -362,15 +362,26 @@ async function messageCounter(ctx) {
     }
 
     // Send a math game based on math count
-    if (messageCounts[chatId].math >= 7) {
+    if (messageCounts[chatId].math >= 14) {
         await sendMathGame(ctx);
         messageCounts[chatId].math = 0; // Reset after triggering
     }
+
+    if (messageCounts[chatId].word >= 12) {
+        await sendWordGameImage(ctx);
+        messageCounts[chatId].word = 0; // Reset after triggering
+    }
+
 
     // Handle user's answer if there's an active game
     if (activeGames[chatId]) {
         await handleAnswer(ctx);
     }
+
+    if (activeGames[chatId]) {
+        await handleWordGuess(ctx);
+    }
+
 }
 
 function generateMathProblem() {
@@ -812,6 +823,134 @@ bot.command('gift', async (ctx) => {
 
 // Note: No need for the confirmation and cancellation actions since we've removed the buttons
 
+const words = [
+    "dog", "cat", "bird", "lion", "tiger", "elephant", "monkey", "zebra",
+    "apple", "banana", "grape", "honey", "juice", 
+    "kite", "mountain", "ocean", "river", "sun", "tree", 
+    "umbrella", "water", "car", "garden", "hat", "island", 
+    "lemon", "orange", "road", "stone", "train", 
+    "vase", "window", "yarn", "zoo", "ant", "eagle", "fox", 
+    "goat", "hippo", "iguana", "jellyfish", "kangaroo", 
+    "lemur", "meerkat", "newt", "penguin", "rabbit", 
+    "seal", "turtle", "whale", "yak", "wolf", "panther", 
+    "dolphin", "frog", "horse", "koala", "ostrich", "peacock", 
+    "reindeer", "shark", "toucan", "viper", "walrus", 
+    "zebra", "baboon", "cheetah", "deer", "elephant", 
+    "flamingo", "gorilla", "hamster", "iguana", "jaguar", 
+    "koala", "lemur", "mongoose", "narwhal", "owl", 
+    "parrot", "quetzal", "raven", "sloth", "toucan", 
+    "vulture", "zebra", "alligator", "buffalo", "dolphin", 
+    "flamingo", "giraffe", "hummingbird", "iguana", "jackal", 
+    "kangaroo", "lemur", "macaw", "narwhal", "parrot", 
+    "quail", "reindeer", "sloth", "toucan", "wallaby", 
+    "xenops", "yak", "zebra", "alligator", "baboon", 
+    "camel", "donkey", "falcon", "hippo", "jackrabbit", 
+    "koala", "mongoose", "owl", "raven", "seagull", 
+    "tapir", "viper", "wombat", "xenops", "yak", "zebra", 
+    "rain", "storm", "fog", "wind", "sunshine", 
+    "rainbow", "hurricane", "snow", "dew", "frost", 
+    "clear", "gust", "overcast", "sunny", "flood", 
+    "swelter", "stormy", "calm", "cold", "hot", "cool", 
+    "mild", "refreshing", "warm", "scorching", "boiling", 
+    "foggy", "snowy", "windy", "rainy", "sunset", "dusk", 
+    "afternoon", "morning", "midnight", "midday", 
+    "starlight", "moonlight", "weekday", "weekend", "year", 
+    "century", "millennium", "moment", "minute", "hour", 
+    "day", "week", "year", "era", "epoch", "event", 
+    "circumstance", "condition", "case", "instance", 
+    "background", "location", "place", "spot", "city", 
+    "town", "village", "street", "road", "path", 
+    "trail", "intersection", "block", "house", "apartment", 
+    "office", "store", "shop", "market", "mall", 
+    "hotel", "restaurant", "bar", "club", "theater", 
+    "museum", "stadium", "park", "school", "college", 
+    "hospital", "pharmacy", "bank", "library", "church", 
+    "temple", "mosque", "shrine", "palace", "castle", 
+    "monument", "statue", "tower", "factory", "warehouse", 
+    "farm", "ranch", "workshop", "studio"
+];
+
+
+
+
+const bgImageUrl = 'https://files.catbox.moe/aws93i.png';  // Background image URL
+
+function hideLetters(word) {
+    // Replace some letters with underscores (e.g., every other letter)
+    return word
+        .split('')
+        .map((char, index) => (index % 2 === 0 ? '_' : char))
+        .join(' ');  // Add a space between each letter
+}
+
+async function sendWordGameImage(ctx) {
+    const chatId = ctx.chat.id;
+    const word = words[Math.floor(Math.random() * words.length)];  // Pick a random word
+    const hiddenWord = hideLetters(word);  // Partially hide letters with spaces
+
+    const canvas = createCanvas(1000, 500);
+    const context = canvas.getContext('2d');
+
+    try {
+        // Load background image
+        const bgImage = await loadImage(bgImageUrl);
+        context.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+        // Set text properties
+        context.font = 'bold 60px Arial';
+        context.fillStyle = '#FFFFFF';  // White color for text
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+
+        // Draw hidden word with spaces in the center of the canvas
+        context.fillText(hiddenWord, canvas.width / 2, canvas.height / 2);
+
+        // Convert the canvas to a buffer and upload to Catbox
+        const buffer = canvas.toBuffer('image/png');
+        const form = new FormData();
+        form.append('reqtype', 'fileupload');
+        form.append('fileToUpload', buffer, { filename: 'word_game.png' });
+
+        const response = await axios.post('https://catbox.moe/user/api.php', form, { headers: form.getHeaders() });
+
+        if (response.status === 200 && response.data.startsWith('https')) {
+            await ctx.replyWithPhoto(response.data, { caption: "Guess the word!" });
+            activeGames[chatId] = { type: 'word', answer: word };  // Save the correct answer
+        } else {
+            throw new Error('Failed to upload the image to Catbox');
+        }
+    } catch (error) {
+        console.error('Error generating word game image:', error);
+        await ctx.reply("There was an error creating the word game. Please try again.");
+    }
+}
+
+
+// Hide letters in the word by replacing a few characters with underscores
+function hideLetters(word) {
+    const hideCount = Math.floor(word.length / 2);
+    const hiddenIndices = new Set();
+    while (hiddenIndices.size < hideCount) {
+        hiddenIndices.add(Math.floor(Math.random() * word.length));
+    }
+    return [...word].map((char, idx) => (hiddenIndices.has(idx) ? '_' : char)).join('');
+}
+
+// Handle user guess
+async function handleWordGuess(ctx) {
+    const chatId = ctx.chat.id;
+    const userAnswer = ctx.message?.text?.toLowerCase();
+
+    if (!activeGames[chatId] || activeGames[chatId].type !== 'word') return;
+
+    const game = activeGames[chatId];
+
+    if (userAnswer === game.answer) {
+        await updateUserBalance(ctx.from.id, 40);  // Reward user with 40 coins
+        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned 40 coins. 🎉`);
+        delete activeGames[chatId];  // End the game
+    } 
+}
 
 
 // Middleware for database access
