@@ -345,15 +345,25 @@ async function messageCounter(ctx) {
     // Initialize message counts for games if not present
     messageCounts[chatId] = messageCounts[chatId] || { character: 0, word: 0, math: 0 };
 
-    // Increment message counts for characters, words, and math
+    // Increment all counters at once
     messageCounts[chatId].character++;
-    messageCounts[chatId].word++; // Increment word message count as needed
-    messageCounts[chatId].math++;  // Increment math message count as needed
+    messageCounts[chatId].word++;
+    messageCounts[chatId].math++;
 
-    // Send an image based on character count
+    // Check and trigger games if thresholds are met
     if (messageCounts[chatId].character >= 80) {
         await sendImage(ctx);
-        messageCounts[chatId].character = 0; // Reset after triggering
+        messageCounts[chatId].character = 0;
+    }
+
+    if (messageCounts[chatId].math >= 14) {
+        await sendMathGame(ctx);
+        messageCounts[chatId].math = 0;
+    }
+
+    if (messageCounts[chatId].word >= 12) {
+        await sendWordGameImage(ctx);
+        messageCounts[chatId].word = 0;
     }
 
     // Process active character guessing
@@ -361,28 +371,16 @@ async function messageCounter(ctx) {
         await guessCommand(ctx);
     }
 
-    // Send a math game based on math count
-    if (messageCounts[chatId].math >= 14) {
-        await sendMathGame(ctx);
-        messageCounts[chatId].math = 0; // Reset after triggering
-    }
-
-    if (messageCounts[chatId].word >= 12) {
-        await sendWordGameImage(ctx);
-        messageCounts[chatId].word = 0; // Reset after triggering
-    }
-
-
     // Handle user's answer if there's an active game
     if (activeGames[chatId]) {
-        await handleAnswer(ctx);
+        if (activeGames[chatId].type === 'math') {
+            await handleAnswer(ctx);
+        } else if (activeGames[chatId].type === 'word') {
+            await handleWordGuess(ctx);
+        }
     }
-
-    if (activeGames[chatId]) {
-        await handleWordGuess(ctx);
-    }
-
 }
+
 
 function generateMathProblem() {
     const operations = ['+', '-', 'x'];
@@ -416,15 +414,17 @@ async function createMathImage(question) {
     const bgImageUrl = 'https://files.catbox.moe/aws93i.png';
 
     try {
-        // Load the background image
-        const bgImage = await loadImage(bgImageUrl);
+        // Load the background image only once and cache it
+        if (!createMathImage.bgImage) {
+            createMathImage.bgImage = await loadImage(bgImageUrl);
+        }
         
         // Draw the background image onto the canvas
-        ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(createMathImage.bgImage, 0, 0, canvas.width, canvas.height);
 
         // Set white color for the question text
         ctx.font = 'bold 40px Arial';
-        ctx.fillStyle = '#FFFFFF';  // White color for text
+        ctx.fillStyle = '#FFFFFF';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(question, canvas.width / 2, canvas.height / 2);
@@ -883,22 +883,27 @@ function hideLetters(word) {
         .join(' ');  // Add a space between each letter
 }
 
+// Cache the background image
+let cachedBgImage = null;
+
 async function sendWordGameImage(ctx) {
     const chatId = ctx.chat.id;
-    const word = words[Math.floor(Math.random() * words.length)];  // Pick a random word
-    const hiddenWord = hideLetters(word);  // Partially hide letters with spaces
+    const word = words[Math.floor(Math.random() * words.length)];
+    const hiddenWord = hideLetters(word);
 
     const canvas = createCanvas(1000, 500);
     const context = canvas.getContext('2d');
 
     try {
-        // Load background image
-        const bgImage = await loadImage(bgImageUrl);
-        context.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+        // Load background image if not cached
+        if (!cachedBgImage) {
+            cachedBgImage = await loadImage(bgImageUrl);
+        }
+        context.drawImage(cachedBgImage, 0, 0, canvas.width, canvas.height);
 
         // Set text properties
         context.font = 'bold 60px Arial';
-        context.fillStyle = '#FFFFFF';  // White color for text
+        context.fillStyle = '#FFFFFF';
         context.textAlign = 'center';
         context.textBaseline = 'middle';
 
@@ -915,7 +920,7 @@ async function sendWordGameImage(ctx) {
 
         if (response.status === 200 && response.data.startsWith('https')) {
             await ctx.replyWithPhoto(response.data, { caption: "Guess the word!" });
-            activeGames[chatId] = { type: 'word', answer: word };  // Save the correct answer
+            activeGames[chatId] = { type: 'word', answer: word };
         } else {
             throw new Error('Failed to upload the image to Catbox');
         }
@@ -924,7 +929,6 @@ async function sendWordGameImage(ctx) {
         await ctx.reply("There was an error creating the word game. Please try again.");
     }
 }
-
 
 // Hide letters in the word by replacing a few characters with underscores
 function hideLetters(word) {
