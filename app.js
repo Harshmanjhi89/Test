@@ -453,41 +453,29 @@ async function createMathImage(question) {
 async function sendMathGame(ctx) {
     const chatId = ctx.chat.id;
     
-    // Clear any existing timeout and game for this chat
-    if (gameTimeouts[chatId]) {
-        clearTimeout(gameTimeouts[chatId]);
-        delete gameTimeouts[chatId];
-    }
-    if (activeGames[chatId]) {
-        delete activeGames[chatId];
-    }
+    // Clear any existing game for this chat
+    if (gameTimeouts[chatId]) clearTimeout(gameTimeouts[chatId]);
+    delete gameTimeouts[chatId];
+    delete activeGames[chatId];
 
+    // Set up a new math game
     const { num1, num2, operation, answer } = generateMathProblem();
-
     const question = `What is ${num1} ${operation} ${num2}?`;
     const imageUrl = await createMathImage(question);
 
     if (!imageUrl) {
-        await ctx.reply("Sorry, there was an error creating the math game. Please try again later.");
+        await ctx.reply("Error creating the math game. Please try again.");
         return;
     }
 
-    activeGames[chatId] = {
-        type: 'math',
-        answer: answer.toString()
-    };
-
-    await ctx.replyWithPhoto(imageUrl, {
-        caption: `Solve the math problem shown in the image.\n\nJust type your answer!`,
-    });
+    activeGames[chatId] = { type: 'math', answer: answer.toString() };
+    await ctx.replyWithPhoto(imageUrl, { caption: "Solve the math problem!" });
 
     gameTimeouts[chatId] = setTimeout(() => {
-        if (activeGames[chatId] && activeGames[chatId].type === 'math') {
-            ctx.reply(`Time's up! The answer was: ${answer}`);
-            delete activeGames[chatId];
-        }
+        ctx.reply(`Time's up! The answer was: ${answer}`);
+        delete activeGames[chatId];
         delete gameTimeouts[chatId];
-    }, 60000); // 60 seconds timeout
+    }, 60000);
 }
 
 async function handleAnswer(ctx) {
@@ -495,21 +483,23 @@ async function handleAnswer(ctx) {
     const userId = ctx.from.id;
     const userAnswer = ctx.message?.text?.toLowerCase();
 
+    // Check if there's an active math game in this chat
     if (!activeGames[chatId] || activeGames[chatId].type !== 'math') return;
 
     const game = activeGames[chatId];
-
+    
+    // Compare the user's answer with the correct answer
     if (userAnswer === game.answer) {
-        if (gameTimeouts[chatId]) {
-            clearTimeout(gameTimeouts[chatId]);
-            delete gameTimeouts[chatId];
-        }
-
-        await updateUserBalance(userId, 40);
-        await reactToMessage(chatId, ctx.message.message_id);
-        await ctx.reply(`Correct, <a href="tg://user?id=${userId}">${ctx.from.first_name}</a>! You've earned 40 coins. 🎉`, { parse_mode: 'HTML' });
+        // Clear the game and timeout
+        if (gameTimeouts[chatId]) clearTimeout(gameTimeouts[chatId]);
         delete activeGames[chatId];
-        messageCounts[chatId].math = 0; // Reset math game counter
+        delete gameTimeouts[chatId];
+
+        // Respond with a correct answer message
+        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned 40 coins. 🎉`);
+        await updateUserBalance(userId, 40);  // Update balance or score
+    } else {
+        await ctx.reply("❌ Incorrect answer, try again!");
     }
 }
 
@@ -909,57 +899,37 @@ function hideLetters(word) {
 async function sendWordGameImage(ctx) {
     const chatId = ctx.chat.id;
 
-    // Clear any existing timeout and game for this chat
-    if (gameTimeouts[chatId]) {
-        clearTimeout(gameTimeouts[chatId]);
-        delete gameTimeouts[chatId];
-    }
-    if (activeGames[chatId]) {
-        delete activeGames[chatId];
-    }
+    // Clear any existing game for this chat
+    if (gameTimeouts[chatId]) clearTimeout(gameTimeouts[chatId]);
+    delete gameTimeouts[chatId];
+    delete activeGames[chatId];
 
+    // Set up a new word game
     const word = words[Math.floor(Math.random() * words.length)];
     const hiddenWord = hideLetters(word);
-
     const canvas = createCanvas(1000, 500);
     const context = canvas.getContext('2d');
 
+    // Draw background and hidden word, then send the image
     try {
-        if (!cachedBgImage) {
-            cachedBgImage = await loadImage(bgImageUrl);
-        }
         context.drawImage(cachedBgImage, 0, 0, canvas.width, canvas.height);
-
-        context.font = 'bold 60px Arial';
-        context.fillStyle = '#FFFFFF';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
         context.fillText(hiddenWord, canvas.width / 2, canvas.height / 2);
-
         const buffer = canvas.toBuffer('image/png');
-        const form = new FormData();
-        form.append('reqtype', 'fileupload');
-        form.append('fileToUpload', buffer, { filename: 'word_game.png' });
 
         const response = await axios.post('https://catbox.moe/user/api.php', form, { headers: form.getHeaders() });
-
         if (response.status === 200 && response.data.startsWith('https')) {
             await ctx.replyWithPhoto(response.data, { caption: "Guess the word!" });
             activeGames[chatId] = { type: 'word', answer: word };
 
             gameTimeouts[chatId] = setTimeout(() => {
-                if (activeGames[chatId] && activeGames[chatId].type === 'word') {
-                    ctx.reply(`Time's up! The word was: ${word}`);
-                    delete activeGames[chatId];
-                }
+                ctx.reply(`Time's up! The word was: ${word}`);
+                delete activeGames[chatId];
                 delete gameTimeouts[chatId];
-            }, 60000); // 60 seconds timeout
-        } else {
-            throw new Error('Failed to upload the image to Catbox');
-        }
+            }, 60000);
+        } else throw new Error('Failed to upload image.');
     } catch (error) {
-        console.error('Error generating word game image:', error);
-        await ctx.reply("There was an error creating the word game. Please try again.");
+        console.error(error);
+        await ctx.reply("Error creating the word game. Please try again.");
     }
 }
 
@@ -967,20 +937,23 @@ async function handleWordGuess(ctx) {
     const chatId = ctx.chat.id;
     const userAnswer = ctx.message?.text?.toLowerCase();
 
+    // Check if there's an active word game in this chat
     if (!activeGames[chatId] || activeGames[chatId].type !== 'word') return;
 
     const game = activeGames[chatId];
 
+    // Compare the user's answer with the correct answer
     if (userAnswer === game.answer) {
-        if (gameTimeouts[chatId]) {
-            clearTimeout(gameTimeouts[chatId]);
-            delete gameTimeouts[chatId];
-        }
-
-        await updateUserBalance(ctx.from.id, 40);
-        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned 40 coins. 🎉`);
+        // Clear the game and timeout
+        if (gameTimeouts[chatId]) clearTimeout(gameTimeouts[chatId]);
         delete activeGames[chatId];
-        messageCounts[chatId].word = 0; // Reset word game counter
+        delete gameTimeouts[chatId];
+
+        // Respond with a correct answer message
+        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned 40 coins. 🎉`);
+        await updateUserBalance(ctx.from.id, 40);  // Update balance or score
+    } else {
+        await ctx.reply("❌ Incorrect answer, try again!");
     }
 }
 
@@ -1033,6 +1006,14 @@ bot.on('message', async  (ctx) => {
         await guessCommand(ctx);
     } else {
         await messageCounter(ctx); // This will now handle math and word games as well
+    }
+});
+
+bot.on('message', async (ctx) => {
+    if (activeGames[ctx.chat.id]?.type === 'math') {
+        await handleAnswer(ctx);  // Handle math game answers
+    } else if (activeGames[ctx.chat.id]?.type === 'word') {
+        await handleWordGuess(ctx);  // Handle word game guesses
     }
 });
 
