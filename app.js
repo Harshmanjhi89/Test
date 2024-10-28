@@ -59,6 +59,25 @@ const sentCharacters = {};
 const lastCharacters = {};
 const firstCorrectGuesses = {};
 
+// Cache for storing processed images
+const cachedImages = {}; // Ensure this variable is at a global scope
+
+// Function to fetch and convert an image once, then cache it
+async function fetchAndCacheImage(url) {
+    if (cachedImages[url]) {
+        return cachedImages[url]; // Return cached version
+    }
+    
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const optimizedImage = await sharp(response.data)
+        .resize({ width: 800 }) // Resize as needed
+        .png() // Convert to PNG format
+        .toBuffer();
+
+    cachedImages[url] = optimizedImage; // Cache for future use
+    return optimizedImage;
+}
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 const { MongoClient } = require('mongodb');
@@ -285,11 +304,6 @@ bot.command(['guess', 'grab', 'char', 'hunt'], async (ctx) => {
 });
 
 
-// Helper function to sort arrays
-function sorted(arr) {
-    return arr.slice().sort();
-}
-
 async function favCommand(ctx) {
     const userId = ctx.from.id;
 
@@ -357,7 +371,7 @@ async function messageCounter(ctx) {
     messageCounts[chatId].character++;
 
     // Check if total message count has reached the threshold for a random game
-    if (messageCounts[chatId].total >= 120) {
+    if (messageCounts[chatId].total >= 4) {
         const randomGame = Math.random() < 0.5 ? 'math' : 'word';
 
         // Trigger the selected game and reset the counter
@@ -460,6 +474,7 @@ async function messageCounter(ctx) {
     }
 }
 
+// Generate a random math problem
 function generateMathProblem() {
     const operations = ['+', '-', 'x'];
     const operation = operations[Math.floor(Math.random() * operations.length)];
@@ -472,7 +487,7 @@ function generateMathProblem() {
             answer = num1 + num2;
             break;
         case '-':
-            num1 = Math.floor(Math.random() * 50) + 26; // Ensure num1 is always larger
+            num1 = Math.floor(Math.random() * 50) + 26;
             num2 = Math.floor(Math.random() * 25) + 1;
             answer = num1 - num2;
             break;
@@ -486,75 +501,29 @@ function generateMathProblem() {
     return { num1, num2, operation, answer };
 }
 
-async function preloadBackgroundImage() {
-    const response = await axios.get(bgImageUrl, { responseType: 'arraybuffer' });
-    bgImageBuffer = response.data;
-}
-
 // Function to create a math image
 async function createMathImage(question) {
-    if (imageCache[question]) {
-        return imageCache[question]; // Return cached image if it exists
-    }
+    const bgImageUrl = 'https://files.catbox.moe/aws93i.png'; // Replace with actual URL
+    const background = await fetchAndCacheImage(bgImageUrl);
 
     const overlay = Buffer.from(
-        `<svg width="1000" height="500">
-            <rect x="0" y="0" width="1000" height="500" fill="rgba(0, 0, 0, 0.5)" />
-            <text x="500" y="250" font-size="60" font-family="Arial" font-weight="bold" fill="#FFFFFF" text-anchor="middle" alignment-baseline="middle">${question}</text>
+        `<svg width="800" height="400">
+            <rect x="0" y="0" width="800" height="400" fill="rgba(0, 0, 0, 0.5)" />
+            <text x="400" y="200" font-size="50" fill="#FFF" text-anchor="middle">${question}</text>
         </svg>`
     );
 
-    const finalImageBuffer = await sharp(bgImageBuffer)
-        .resize(1000, 500)
+    return await sharp(background)
         .composite([{ input: overlay, blend: 'over' }])
-        .png()
         .toBuffer();
-
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', finalImageBuffer, { filename: 'math_question_with_bg.png' });
-
-    const response = await axios.post('https://catbox.moe/user/api.php', form, {
-        headers: form.getHeaders()
-    });
-
-    if (response.status === 200 && response.data.startsWith('https')) {
-        imageCache[question] = response.data; // Cache the generated image URL
-        return response.data;
-    } else {
-        throw new Error('Failed to upload the image to Catbox');
-    }
 }
 
 async function sendMathGame(ctx) {
-    const chatId = ctx.chat.id;
-
-    if (activeGames[chatId]?.math) {
-        ctx.reply("A math game is already in progress. Ending the previous game...");
-        delete activeGames[chatId].math; // End the previous game
-    }
-
     const { num1, num2, operation, answer } = generateMathProblem();
-    const question = `What is ${num1} ${operation} ${num2}?`;
-    const imageUrl = await createMathImage(question);
+    const question = `${num1} ${operation} ${num2} = ?`;
+    const image = await createMathImage(question);
 
-    activeGames[chatId] = activeGames[chatId] || {};
-    activeGames[chatId].math = {
-        answer: answer.toString(),
-        startTime: Date.now(),
-        timeLimit: 60000 // 60 seconds time limit
-    };
-
-    await ctx.replyWithPhoto(imageUrl, {
-        caption: `Solve the math problem shown in the image.\n\nJust type your answer! You have 60 seconds.`,
-    });
-
-    setTimeout(() => {
-        if (activeGames[chatId]?.math) {
-            ctx.reply(`Time's up! The correct answer was ${answer}.`);
-            delete activeGames[chatId].math;
-        }
-    }, 60000);
+    ctx.replyWithPhoto({ source: image }, { caption: "Solve the math problem!" });
 }
 
 
@@ -998,10 +967,9 @@ const words = [
 
 
 
-const bgImageUrl = 'https://files.catbox.moe/aws93i.png';  // Background image URL
-
 
 // Function to hide letters in a word
+// Word game function
 function hideLetters(word) {
     const hideCount = Math.ceil(word.length / 2);
     const hiddenIndices = new Set();
@@ -1011,76 +979,30 @@ function hideLetters(word) {
     return [...word].map((char, idx) => (hiddenIndices.has(idx) ? '_' : char)).join(' ');
 }
 
-async function createWordImage(hiddenWord) {
-    if (imageCache[hiddenWord]) {
-        return imageCache[hiddenWord]; // Return cached image if it exists
-    }
+// Create word image
+async function createWordImage(word) {
+    const bgImageUrl = 'https://files.catbox.moe/aws93i.png'; // Replace with actual URL
+    const background = await fetchAndCacheImage(bgImageUrl);
 
-    // Load the background image
-    const bgImageBuffer = await axios.get(bgImageUrl, { responseType: 'arraybuffer' }).then(res => res.data);
-
-    // Create an overlay for the text
+    const hiddenWord = hideLetters(word);
     const overlay = Buffer.from(
-        `<svg width="1000" height="500">
-            <rect x="0" y="0" width="1000" height="500" fill="rgba(0, 0, 0, 0.5)" />
-            <text x="500" y="250" font-size="80" font-family="Arial" font-weight="bold" fill="#FFFFFF" text-anchor="middle" alignment-baseline="middle">${hiddenWord}</text>
+        `<svg width="800" height="400">
+            <rect x="0" y="0" width="800" height="400" fill="rgba(0, 0, 0, 0.5)" />
+            <text x="400" y="200" font-size="50" fill="#FFF" text-anchor="middle">${hiddenWord}</text>
         </svg>`
     );
 
-    // Use sharp to overlay text on the background image
-    const finalImageBuffer = await sharp(bgImageBuffer)
-        .resize(1000, 500)
+    return await sharp(background)
         .composite([{ input: overlay, blend: 'over' }])
-        .png()
         .toBuffer();
-
-    // Prepare the form data for upload
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', finalImageBuffer, { filename: 'word_game.png' });
-
-    // Upload the image to Catbox
-    const response = await axios.post('https://catbox.moe/user/api.php', form, {
-        headers: form.getHeaders()
-    });
-
-    if (response.status === 200 && response.data.startsWith('https')) {
-        imageCache[hiddenWord] = response.data; // Cache the generated image URL
-        return response.data;
-    } else {
-        throw new Error('Failed to upload the image to Catbox');
-    }
 }
 
+// Send a word game image to the chat
 async function sendWordGameImage(ctx) {
-    const chatId = ctx.chat.id;
-
-    if (activeGames[chatId]?.word) {
-        ctx.reply("A word game is already in progress. Ending the previous game...");
-        delete activeGames[chatId].word; // End the previous game
-    }
-
     const word = words[Math.floor(Math.random() * words.length)];
-    const hiddenWord = hideLetters(word);
-    const imageUrl = await createWordImage(hiddenWord);
+    const image = await createWordImage(word);
 
-    activeGames[chatId] = activeGames[chatId] || {};
-    activeGames[chatId].word = {
-        answer: word,
-        startTime: Date.now(),
-        timeLimit: 30000 // 30 seconds time limit
-    };
-
-    await ctx.replyWithPhoto(imageUrl, {
-        caption: "Guess the word! You have 30 seconds."
-    });
-
-    setTimeout(() => {
-        if (activeGames[chatId]?.word) {
-            ctx.reply(`Time's up! The correct word was "${word}".`);
-            delete activeGames[chatId].word;
-        }
-    }, 30000);
+    ctx.replyWithPhoto({ source: image }, { caption: "Guess the word!" });
 }
 
 async function handleWordGuess(ctx) {
