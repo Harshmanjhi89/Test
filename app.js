@@ -474,32 +474,6 @@ async function messageCounter(ctx) {
     }
 }
 
-// Generate a random math problem
-function generateMathProblem() {
-    const operations = ['+', '-', 'x'];
-    const operation = operations[Math.floor(Math.random() * operations.length)];
-    let num1, num2, answer;
-
-    switch (operation) {
-        case '+':
-            num1 = Math.floor(Math.random() * 50) + 1;
-            num2 = Math.floor(Math.random() * 50) + 1;
-            answer = num1 + num2;
-            break;
-        case '-':
-            num1 = Math.floor(Math.random() * 50) + 26;
-            num2 = Math.floor(Math.random() * 25) + 1;
-            answer = num1 - num2;
-            break;
-        case 'x':
-            num1 = Math.floor(Math.random() * 12) + 1;
-            num2 = Math.floor(Math.random() * 12) + 1;
-            answer = num1 * num2;
-            break;
-    }
-
-    return { num1, num2, operation, answer };
-}
 
 // Function to create a math image
 async function createMathImage(question) {
@@ -519,20 +493,33 @@ async function createMathImage(question) {
 }
 
 async function sendMathGame(ctx) {
-    const { num1, num2, operation, answer } = generateMathProblem();
+    const chatId = ctx.chat.id;
+    const num1 = Math.floor(Math.random() * 10);
+    const num2 = Math.floor(Math.random() * 10);
+    const operation = "+"; // Simplified for now, can be randomized
     const question = `${num1} ${operation} ${num2} = ?`;
-    const image = await createMathImage(question);
+    const image = await createMathImage(question); // Ensure this creates an image without errors
 
     ctx.replyWithPhoto({ source: image }, { caption: "Solve the math problem!" });
+
+    // Store the game information
+    activeGames[chatId] = {
+        math: {
+            answer: (num1 + num2).toString(),
+            startTime: Date.now(),
+            timeLimit: 30000, // Example time limit of 30 seconds
+        },
+    };
 }
 
 
 async function handleMathAnswer(ctx) {
     const chatId = ctx.chat.id;
-    const userId = ctx.from.id;
     const userAnswer = ctx.message?.text?.toLowerCase();
 
-    if (!activeGames[chatId] || !activeGames[chatId].math) return;
+    if (!activeGames[chatId]?.math) {
+        return await ctx.reply("No active math game in this chat.");
+    }
 
     const game = activeGames[chatId].math;
     const elapsedTime = Date.now() - game.startTime;
@@ -543,13 +530,15 @@ async function handleMathAnswer(ctx) {
         return;
     }
 
+    // Check the answer
     if (userAnswer === game.answer) {
         const rewardCoins = Math.max(10, Math.floor(40 * (1 - elapsedTime / game.timeLimit)));
-        await updateUserBalance(userId, rewardCoins);
-        await reactToMessage(chatId, ctx.message.message_id);
-        await ctx.reply(`Correct, <a href="tg://user?id=${userId}">${ctx.from.first_name}</a>! You've earned ${rewardCoins} coins. 🎉`, { parse_mode: 'HTML' });
-        delete activeGames[chatId].math;
-    } 
+        await updateUserBalance(ctx.from.id, rewardCoins);
+        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned ${rewardCoins} coins.`);
+        delete activeGames[chatId].math; // End the math game
+    } else {
+        await ctx.reply("Sorry, that's not correct. Try again!");
+    }
 }
 
 // Function to update user's balance
@@ -965,7 +954,7 @@ const words = [
 ];
 
 
-
+ra
 
 
 // Function to hide letters in a word
@@ -1005,29 +994,24 @@ async function sendWordGameImage(ctx) {
     ctx.replyWithPhoto({ source: image }, { caption: "Guess the word!" });
 }
 
-async function handleWordGuess(ctx) {
+async function wordGuessingHandler(ctx) {
     const chatId = ctx.chat.id;
-    const userId = ctx.from.id;
-    const userAnswer = ctx.message?.text?.toLowerCase();
 
-    if (!activeGames[chatId] || !activeGames[chatId].word) return;
-
-    const game = activeGames[chatId].word;
-    const elapsedTime = Date.now() - game.startTime;
-
-    if (elapsedTime > game.timeLimit) {
-        await ctx.reply("Sorry, time's up! The word game has ended.");
-        delete activeGames[chatId].word;
-        return;
+    if (!activeGames[chatId]?.word) {
+        return await ctx.reply("No active word guessing game in this chat.");
     }
 
+    const game = activeGames[chatId].word;
+    const userAnswer = ctx.message.text.split(' ').slice(1).join(' ').toLowerCase();
+
     if (userAnswer === game.answer) {
-        const rewardCoins = Math.max(10, Math.floor(40 * (1 - elapsedTime / game.timeLimit)));
-        await updateUserBalance(userId, rewardCoins);
-        await reactToMessage(chatId, ctx.message.message_id);
-        await ctx.reply(`Correct, <a href="tg://user?id=${userId}">${ctx.from.first_name}</a>! The word was "${game.answer}". You've earned ${rewardCoins} coins. 🎉`, { parse_mode: 'HTML' });
-        delete activeGames[chatId].word;
-    } 
+        const rewardCoins = Math.max(10, Math.floor(40 * (1 - (Date.now() - game.startTime) / game.timeLimit)));
+        await updateUserBalance(ctx.from.id, rewardCoins);
+        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned ${rewardCoins} coins.`);
+        delete activeGames[chatId].word; // End the word game
+    } else {
+        await ctx.reply("Incorrect, try again!");
+    }
 }
 
 // Middleware for database access
