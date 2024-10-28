@@ -469,7 +469,7 @@ async function messageCounter(ctx) {
             await handleMathAnswer(ctx);
         }
         if (activeGames[chatId].word) {
-            await handleWordGuess(ctx);
+            await wordGuessingHandler(ctx);
         }
     }
 }
@@ -954,9 +954,6 @@ const words = [
 ];
 
 
-ra
-
-
 // Function to hide letters in a word
 // Word game function
 function hideLetters(word) {
@@ -994,25 +991,26 @@ async function sendWordGameImage(ctx) {
     ctx.replyWithPhoto({ source: image }, { caption: "Guess the word!" });
 }
 
-async function wordGuessingHandler(ctx) {
-    const chatId = ctx.chat.id;
-
-    if (!activeGames[chatId]?.word) {
-        return await ctx.reply("No active word guessing game in this chat.");
+    async function wordGuessingHandler(ctx) {
+        const chatId = ctx.chat.id;
+        const userInput = ctx.message.text.trim().toLowerCase();
+    
+        // Check if the game is active
+        if (!activeGames[chatId]?.word) {
+            return await ctx.reply("No active word guessing game in this chat. Start a new game with /startword.");
+        }
+    
+        const currentWord = activeGames[chatId].word;
+        
+        // Check if the guess is correct
+        if (userInput === currentWord) {
+            await ctx.reply(`Correct! The word was "${currentWord}". You guessed it!`);
+            delete activeGames[chatId]; // End the game
+        } else {
+            activeGames[chatId].attempts++;
+            await ctx.reply(`Incorrect guess! You've made ${activeGames[chatId].attempts} attempts. Try again!`);
+        }
     }
-
-    const game = activeGames[chatId].word;
-    const userAnswer = ctx.message.text.split(' ').slice(1).join(' ').toLowerCase();
-
-    if (userAnswer === game.answer) {
-        const rewardCoins = Math.max(10, Math.floor(40 * (1 - (Date.now() - game.startTime) / game.timeLimit)));
-        await updateUserBalance(ctx.from.id, rewardCoins);
-        await ctx.reply(`Correct, ${ctx.from.first_name}! You've earned ${rewardCoins} coins.`);
-        delete activeGames[chatId].word; // End the word game
-    } else {
-        await ctx.reply("Incorrect, try again!");
-    }
-}
 
 // Middleware for database access
 bot.use((ctx, next) => {
@@ -1059,7 +1057,7 @@ bot.on('inline_query', (ctx) => inlineQuery(ctx));
 bot.on('message', async (ctx) => {
     // Check if the character game is active
     if (ctx.chat.characterGameActive) {
-        await guessCommand(ctx);
+        await g(ctx);
     } else {
         await messageCounter(ctx); // Handle other message actions
     }
