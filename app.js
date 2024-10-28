@@ -354,6 +354,7 @@ async function nowCommand(ctx) {
     }
 }
 
+
 async function messageCounter(ctx) {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id;
@@ -361,6 +362,16 @@ async function messageCounter(ctx) {
     // Only proceed if the chat is a group or supergroup
     if (!['group', 'supergroup'].includes(ctx.chat.type)) {
         return;
+    }
+
+    // Check if a game is already active in a different group
+    if (activeGameGroupId && activeGameGroupId !== chatId) {
+        return; // Prevent game from starting in multiple groups
+    }
+
+    // Initialize message counts and set the active game group if not already set
+    if (!activeGameGroupId) {
+        activeGameGroupId = chatId;
     }
 
     // Initialize message counts if not present
@@ -384,7 +395,7 @@ async function messageCounter(ctx) {
         messageCounts[chatId].total = 0; // Reset the total message count
     }
 
-    // Check and trigger character guessing
+    // Check and trigger character guessing game
     if (ctx.chat.characterGameActive) {
         const guess = ctx.message.text.toLowerCase().trim();
         if (!guess) {
@@ -472,7 +483,13 @@ async function messageCounter(ctx) {
             await wordGuessingHandler(ctx);
         }
     }
+
+    // If game is no longer active, reset activeGameGroupId
+    if (!ctx.chat.characterGameActive) {
+        activeGameGroupId = null;
+    }
 }
+
 
 
 // Function to create a math image
